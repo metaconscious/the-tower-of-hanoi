@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 template<std::totally_ordered T, typename Sequence = std::stack<T>::container_type>
 class HanoiTower
@@ -194,175 +195,160 @@ std::ostream& operator<<(std::ostream& os, const TheTowerOfHanoi& theTowerOfHano
     return os;
 }
 
-enum class command_type
+class TheTowerOfHanoiGame
 {
-    nop,
-    move,
-    undo,
-    quit
-};
-
-struct parse_result_type
-{
-    bool ok{ false };
-    command_type type{ command_type::nop };
-    std::string_view from{};
-    std::string_view to{};
-};
-
-parse_result_type parse(std::string_view input)
-{
-    parse_result_type result{};
-
-    if (input.starts_with('/'))
+public:
+    using engine_type = TheTowerOfHanoi;
+    enum class command_type
     {
-        result.ok = true;
-
-        auto command{ input.substr(1) };
-
-        if (command == "quit")
-        {
-            result.type = command_type::quit;
-        }
-        else if (command == "undo")
-        {
-            result.type = command_type::undo;
-        }
-    }
-    else if (auto pos{ input.find(',') }; pos != std::string_view::npos)
+        nop,
+        move,
+        undo,
+        quit
+    };
+    struct parse_result_type
     {
-        result.ok = true;
-        result.type = command_type::move;
-        result.from = input.substr(0, pos);
-        result.to = input.substr(pos + 1);
-    }
+        bool ok;
+        command_type type;
+        std::string_view from;
+        std::string_view to;
+    };
 
-    return result;
-}
-
-int main()
-{
-    TheTowerOfHanoi hanoi{};
-
-    auto&& [it, ok] { hanoi.create("a", [](const TheTowerOfHanoi::container_type::iterator& iterator) -> bool
+    static parse_result_type parse(std::string_view input)
     {
-        for (TheTowerOfHanoi::mapped_type::size_type i{ 9 }; i > 0; --i)
+        parse_result_type result{ .ok = false, .type = command_type::nop };
+
+        if (input.starts_with('/'))
         {
-            if (auto pushed{ iterator->second.push(i) }; !pushed)
+            result.ok = true;
+
+            auto command{ input.substr(1) };
+
+            if (command == "quit")
             {
-                return false;
+                result.type = command_type::quit;
+            }
+            else if (command == "undo")
+            {
+                result.type = command_type::undo;
             }
         }
-        return true;
-    }) };
+        else if (auto pos{ input.find(',') }; pos != std::string_view::npos)
+        {
+            result.ok = true;
+            result.type = command_type::move;
+            result.from = input.substr(0, pos);
+            result.to = input.substr(pos + 1);
+        }
 
-    hanoi.create("b");
-    hanoi.create("c");
-
-    bool running{ true };
-
-    std::string input{};
+        return result;
+    }
 
     struct last_op_type
     {
         command_type command;
         std::string from;
         std::string to;
-    } lastOp{ .command = command_type::nop };
+    };
 
-    while (running)
+public:
+    TheTowerOfHanoiGame()
+            : m_engine{}
     {
-        std::cout << "\033[2J\033[1;1H";
+    }
 
-        std::cout << hanoi << '\n';
+    explicit TheTowerOfHanoiGame(engine_type::mapped_type::size_type initial)
+            : m_engine{}
+    {
+        auto&& [it, ok] {
+                m_engine.create("a", [initial](const TheTowerOfHanoi::container_type::iterator& iterator) -> bool
+                {
+                    for (auto i{ initial }; i > 0; --i)
+                    {
+                        if (auto pushed{ iterator->second.push(i) }; !pushed)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                }) };
 
-        std::getline(std::cin, input, '\n');
+        m_engine.create("b");
+        m_engine.create("c");
+    }
 
-        if (std::cin.fail())
+    explicit TheTowerOfHanoiGame(engine_type engine)
+            : m_engine(std::move(engine))
+    {
+    }
+
+    void run()
+    {
+        m_running = true;
+        while (m_running)
         {
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            std::cin.clear();
-            continue;
-        }
+            std::cout << "\033[2J\033[1;1H";
 
-        auto result{ parse(input) };
+            std::cout << m_engine << '\n';
 
-        if (result.ok)
-        {
-            switch (result.type)
+            std::getline(std::cin, m_input, '\n');
+
+            if (std::cin.fail())
             {
-                case command_type::quit:
-                    running = false;
-                    break;
-                case command_type::move:
-                    if (hanoi.has(result.from) && hanoi.has(result.to))
-                    {
-                        if (hanoi.move(result.from, result.to))
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cin.clear();
+                continue;
+            }
+
+            auto result{ parse(m_input) };
+
+            if (result.ok)
+            {
+                switch (result.type)
+                {
+                    case command_type::quit:
+                        m_running = false;
+                        break;
+                    case command_type::move:
+                        if (m_engine.has(result.from) && m_engine.has(result.to))
                         {
-                            lastOp.command = command_type::move;
-                            lastOp.from = result.from;
-                            lastOp.to = result.to;
+                            if (m_engine.move(result.from, result.to))
+                            {
+                                m_lastOp.command = command_type::move;
+                                m_lastOp.from = result.from;
+                                m_lastOp.to = result.to;
+                            }
                         }
-                    }
-                    break;
-                case command_type::undo:
-                    if (lastOp.command == command_type::move)
-                    {
-                        if (hanoi.move(lastOp.to, lastOp.from))
+                        break;
+                    case command_type::undo:
+                        if (m_lastOp.command == command_type::move)
                         {
-                            lastOp.command = command_type::move;
-                            std::swap(lastOp.from, lastOp.to);
+                            if (m_engine.move(m_lastOp.to, m_lastOp.from))
+                            {
+                                m_lastOp.command = command_type::move;
+                                std::swap(m_lastOp.from, m_lastOp.to);
+                            }
                         }
-                    }
-                    break;
-                default:
-                    break;
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
 
+private:
+    engine_type m_engine;
+    bool m_running{ false };
+    std::string m_input{};
+    last_op_type m_lastOp{ .command = command_type::nop };
+};
 
-//    hanoi.move("a", "c"); //
-//
-//    std::cout << hanoi << '\n';
-//
-//    hanoi.move("c", "b");
-//    hanoi.move("a", "c"); //
-//    hanoi.move("b", "c");
-//
-//    std::cout << hanoi << '\n';
-//
-//    hanoi.move("c", "a");
-//    hanoi.move("c", "b");
-//    hanoi.move("a", "b");
-//    hanoi.move("a", "c"); //
-//    hanoi.move("b", "a");
-//    hanoi.move("b", "c");
-//    hanoi.move("a", "c");
-//
-//    std::cout << hanoi << '\n';
-//
-//    hanoi.move("c", "a");
-//    hanoi.move("c", "b");
-//    hanoi.move("a", "c");
-//    hanoi.move("b", "a");
-//    hanoi.move("c", "a");
-//    hanoi.move("c", "b");
-//    hanoi.move("a", "c");
-//    hanoi.move("a", "b");
-//    hanoi.move("c", "b");
-//    hanoi.move("a", "c"); //
-//    hanoi.move("b", "c");
-//    hanoi.move("b", "a");
-//    hanoi.move("c", "a");
-//    hanoi.move("b", "c");
-//    hanoi.move("a", "c");
-//    hanoi.move("a", "b");
-//    hanoi.move("c", "a");
-//    hanoi.move("b", "c");
-//    hanoi.move("a", "c");
-//
-//    std::cout << hanoi << '\n';
+int main()
+{
+    TheTowerOfHanoiGame game{ 9 };
+
+    game.run();
 
     return 0;
 }
